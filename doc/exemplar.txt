@@ -1,0 +1,163 @@
+*exemplar.txt*  Show how experienced people use the thing under your cursor
+
+==============================================================================
+CONTENTS                                                    *exemplar-contents*
+
+  1. What it does .......................................... |exemplar-intro|
+  2. Commands .............................................. |exemplar-commands|
+  3. Keys in the list ...................................... |exemplar-keys|
+  4. Options ............................................... |exemplar-options|
+  5. Functions ............................................. |exemplar-functions|
+  6. Where it searches ..................................... |exemplar-roots|
+  7. Health ................................................ |exemplar-health|
+
+==============================================================================
+1. WHAT IT DOES                                                *exemplar-intro*
+
+Put the cursor on a function, a builtin, or any other name. Run |:Exemplar|.
+exemplar searches the standard library and the packages on your disk for
+real uses of that name, ranks them, and shows the ten best. The preview on
+the left shows the whole function the example sits in, with the example
+line marked. The list on the right has one line per example.
+
+Searches use ripgrep when it is installed, otherwise `git grep`, otherwise
+`grep`. They run in the background. Neovim 0.10 or newer.
+
+==============================================================================
+2. COMMANDS                                                 *exemplar-commands*
+
+                                                                    *:Exemplar*
+:Exemplar                 Search the name under the cursor and open the list.
+:Exemplar {text}          Search {text} instead. A dotted name like
+                          `std.mem.tokenize` searches the last part and ranks
+                          lines with the full name higher.
+:'<,'>Exemplar            Search the visual selection.
+:Exemplar next [n]        Show the next example in a small window by the
+                          cursor, without the list. [n] skips.
+:Exemplar prev [n]        The same, backwards.
+:Exemplar roots [lang]    Print where exemplar searches for this buffer's
+                          language, and why a place was skipped.
+:Exemplar roots refresh   Detect again.
+:Exemplar qf              Send the current examples to the quickfix list.
+:Exemplar names           For every function, variable and type declared in
+                          this file, show the three most common library
+                          names built on the same word as dim text at the
+                          end of the line, with counts. Notes a different
+                          casing style, or an exact match. Any key clears
+                          it. `:Exemplar names clear` clears it too.
+                          Declarations are found with simple patterns, so
+                          some may be missed.
+:Exemplar refresh         Forget cached searches and roots.
+
+==============================================================================
+3. KEYS IN THE LIST                                             *exemplar-keys*
+
+  n / N       next / previous example. Counts work: `2n`.
+  <CR>        open the example in the window you came from
+  s / v       open in a split / vertical split
+  y           yank the example line
+  Y           yank the whole preview block
+  m           show ten more
+  d           show or hide definitions
+  q / <Esc>   close
+  g?          this list
+
+exemplar sets no global keys. Suggested: >lua
+  vim.keymap.set("n", "<leader>se", function() require("exemplar").show() end)
+  vim.keymap.set("n", "]x", function() require("exemplar").next(vim.v.count1) end)
+  vim.keymap.set("n", "[x", function() require("exemplar").prev(vim.v.count1) end)
+<
+==============================================================================
+4. OPTIONS                                                   *exemplar-options*
+
+Call `require("exemplar").setup({...})`. Defaults: >lua
+  require("exemplar").setup({
+    backend = "auto",        -- "auto" | "rg" | "git" | "grep"
+    limit = 10,              -- examples shown first
+    context = 6,             -- lines around the hit when no function is found
+    max_block = 40,          -- longest function shown whole
+    diverse = true,          -- at most 2 per file, 4 per directory, in the top set
+    show_definitions = true, -- keep definitions, tagged `def`, ranked low
+    debounce_ms = 150,       -- for peek() only
+    picker = "builtin",      -- "builtin" | "snacks" | "select"
+    project_config = false,  -- load .exemplar.lua from the project root
+    roots = {},              -- per language, see |exemplar-roots|
+    languages = {},          -- per language settings, see |exemplar-roots|
+    max_hits = 3000,         -- stop reading search output after this many
+    per_file = 20,           -- hits per file the search may return
+  })
+<
+==============================================================================
+5. FUNCTIONS                                               *exemplar-functions*
+
+                                                              *exemplar.setup()*
+setup({opts})             Store options.
+
+                                                               *exemplar.show()*
+show({query})             Search {query}, or the name under the cursor, and
+                          open the list.
+
+                                                               *exemplar.next()*
+                                                               *exemplar.prev()*
+next({count}) prev({count})
+                          Step through the last results in a window by the
+                          cursor. The window closes when the cursor moves.
+
+                                                               *exemplar.peek()*
+peek()                    Preview for the name under the cursor, debounced,
+                          for use from a |CursorHold| autocommand.
+
+                                                              *exemplar.roots()*
+roots({lang}, {refresh})  The detected search roots and any notes.
+
+                                                             *exemplar.search()*
+search({sym}, {lang}, {buf}, {cb})
+                          For other plugins. {sym} is `{ word = "x", chain =
+                          "a.b.x" }`. {cb} gets a session table with
+                          `results`, or nil and a message.
+
+                                                              *exemplar.names()*
+names({buf})              Run the naming comparison on {buf}.
+
+                                                           *exemplar.quickfix()*
+quickfix()                Current results to the quickfix list.
+
+==============================================================================
+6. WHERE IT SEARCHES                                           *exemplar-roots*
+
+exemplar asks the toolchain. It never guesses paths.
+
+  Zig          `zig env`: std_dir, lib_dir, global cache packages.
+               languages.zig.compiler_src adds the compiler source.
+  Rust         `rustc --print sysroot` plus rust-src; ~/.cargo/registry/src.
+  Go           `go env GOROOT GOMODCACHE`.
+  JavaScript   nearest node_modules above the file; `npm root -g`.
+  Python       the interpreter's stdlib and site-packages. VIRTUAL_ENV or
+               a .venv next to the project is preferred.
+  C, C++       the compiler's include search list; /usr/include.
+  Lua          $VIMRUNTIME/lua and installed plugins.
+
+The project root (nearest .git, else the current directory) is always
+searched too, ranked lowest.
+
+Override or extend per language: >lua
+  roots = {
+    zig = { "/opt/zig/lib/std", { path = "~/src/zig", kind = "compiler" } },
+    rust = { only = true, { path = "~/rust/library", kind = "std" } },
+  }
+<
+`kind` is one of `std`, `compiler`, `package`, `project` and sets the rank.
+`only = true` replaces detection instead of extending it.
+
+With `project_config = true`, a file `.exemplar.lua` in the project root
+may return `{ roots = { ... } }`. Off by default because it runs Lua from
+the checkout.
+
+==============================================================================
+7. HEALTH                                                     *exemplar-health*
+
+`:checkhealth exemplar` shows the search backend in use, the roots found
+for every language whose toolchain is installed, and, for the ones that
+are not, the command that failed and the setup line that fixes it.
+
+vim:tw=78:ts=8:ft=help:norl:
